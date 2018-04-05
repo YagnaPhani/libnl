@@ -30,6 +30,7 @@ NLA_MSECS = 7  # Micro seconds (64bit).
 NLA_NESTED = 8  # Nested attributes.
 NLA_TYPE_MAX = NLA_NESTED
 
+USHRT_MAX = 65535
 
 def nla_attr_size(payload):
     """Return size of attribute without padding.
@@ -713,3 +714,51 @@ def nla_is_nested(attr):
     True if attribute has NLA_F_NESTED flag set, otherwise False.
     """
     return not not attr.nla_type & NLA_F_NESTED
+
+def nla_nest_start(msg, attrtype):
+    """
+    Start a new level of nested attributes
+    """
+    start = nlattr(nlmsg_tail(msg.nm_nlh))
+
+    if nla_put(msg, attrtype, 0, None) < 0:
+	return None
+
+    return start
+
+def _nest_end(msg, start, keep_empty):
+
+    #len = nlmsg_tail(msg.nm_nlh).__len__ - int(start)
+    len = nlmsg_tail(msg.nm_nlh).slice.start - start.bytearray.slice.start
+
+    if ( len > USHRT_MAX or (keep_empty != 0 and len == NLA_HDRLEN)):
+        nla_nest_cancel(msg, start)
+        return 0 if (len == NLA_HDRLEN) else -NLE_ATTRSIZE
+
+    start.nla_len = len
+
+    pad = NLMSG_ALIGN(msg.nm_nlh.nlmsg_len) - msg.nm_nlh.nlmsg_len
+
+    if pad > 0:
+        if not nlmsg_reserve(msg, pad, 0):
+	    raise BUG
+
+    return 0
+
+def nla_nest_end(msg, start):
+    """
+    Finalize nesting of attributes.
+    """
+    return _nest_end (msg, start, 0)
+
+def nla_nest_cancel(msg, attr):
+    """
+    Cancel the addition of a nested attribute
+    """
+    len = nlmsg_tail(msg.nm_nlh) - start
+
+    if len < 0:
+        raise BUG
+    elif len > 0:
+        msg.nm_nlh.nlmsg_len -= len
+        nlmsg_tail(msg.nm_nlh).bytearray[len] = bytearray(b'\0') * len
